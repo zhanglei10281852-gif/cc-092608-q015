@@ -199,8 +199,68 @@ CREATE TABLE IF NOT EXISTS operation_events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_operation_events_resource ON operation_events(resource_type,resource_id,id);
+CREATE TABLE IF NOT EXISTS retention_keyring (
+    name TEXT PRIMARY KEY,
+    pepper TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS retention_runs (
+    run_id TEXT PRIMARY KEY,
+    mode TEXT NOT NULL CHECK(mode IN ('preview','apply')),
+    state TEXT NOT NULL DEFAULT 'running' CHECK(state IN ('running','completed','failed')),
+    actor TEXT NOT NULL,
+    cutoff_at TEXT NOT NULL,
+    policy_json TEXT NOT NULL,
+    cursor_json TEXT NOT NULL DEFAULT '{}',
+    totals_json TEXT NOT NULL DEFAULT '{}',
+    plan_json TEXT,
+    baseline_digests_json TEXT,
+    aggregate_digest TEXT,
+    report_json TEXT,
+    error_message TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_retention_runs_state ON retention_runs(state,started_at);
+CREATE TABLE IF NOT EXISTS retention_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES retention_runs(run_id),
+    category TEXT NOT NULL,
+    table_name TEXT NOT NULL,
+    row_id INTEGER NOT NULL,
+    batch_key TEXT NOT NULL,
+    stat_key TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(table_name,row_id)
+);
+CREATE INDEX IF NOT EXISTS idx_retention_records_run ON retention_records(run_id,id);
+CREATE INDEX IF NOT EXISTS idx_retention_records_batch ON retention_records(batch_key,stat_key);
+CREATE TABLE IF NOT EXISTS retention_legal_holds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL CHECK(scope IN ('subscriber','global')),
+    subscriber_hash TEXT,
+    reason TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active','released')),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    released_at TEXT,
+    CHECK(scope='global' OR subscriber_hash IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_retention_holds_lookup ON retention_legal_holds(state,scope,subscriber_hash);
 '''
+
+
+RETENTION_ADDITIVE_COLUMNS = {
+    "retention_runs": ["plan_json"],
+}
 
 
 def ensure_network_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(NETWORK_SCHEMA)
+    # 对早期版本库做幂等的追加列迁移（CREATE TABLE IF NOT EXISTS 不会补齐新列）。
+    for table, columns in RETENTION_ADDITIVE_COLUMNS.items():
+        existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+        for column in columns:
+            if column not in existing:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
