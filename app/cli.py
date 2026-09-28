@@ -7,17 +7,18 @@ from fastapi.testclient import TestClient
 
 from app.database import database_path, get_connection, init_db
 from app.main import app
+from app.network.retention import PrivacyRetentionService
 from app.network.schema import ensure_network_schema
 
 
-def command_init() -> int:
+def command_init(_args=None) -> int:
     init_db()
     ensure_network_schema(get_connection())
     print(json.dumps({"database": str(database_path()), "status": "initialized"}, ensure_ascii=False))
     return 0
 
 
-def command_check() -> int:
+def command_check(_args=None) -> int:
     init_db()
     connection = get_connection()
     ensure_network_schema(connection)
@@ -32,7 +33,7 @@ def command_check() -> int:
     return 0 if result["integrity"] == "ok" and result["foreign_keys"] == 1 else 1
 
 
-def command_smoke() -> int:
+def command_smoke(_args=None) -> int:
     with TestClient(app) as client:
         root = client.get("/")
         health = client.get("/api/system/health")
@@ -47,7 +48,7 @@ def command_smoke() -> int:
     return 0 if result["status_codes"] == [200, 200, 200] else 1
 
 
-def command_network_demo() -> int:
+def command_network_demo(_args=None) -> int:
     with TestClient(app) as client:
         seeded = client.post("/api/network/demo/seed")
         if seeded.status_code != 200:
@@ -96,6 +97,46 @@ def command_network_demo() -> int:
     return 0 if list(result.values())[:3] == [200, 201, 202] and started.status_code == 200 else 1
 
 
+def command_retention_preview(args) -> int:
+    init_db()
+    ensure_network_schema(get_connection())
+    report = PrivacyRetentionService(get_connection()).preview(retention_days=args.days)
+    print(json.dumps(report, ensure_ascii=False))
+    return 0
+
+
+def command_retention_execute(args) -> int:
+    init_db()
+    ensure_network_schema(get_connection())
+    report = PrivacyRetentionService(get_connection()).execute(actor=args.actor, retention_days=args.days)
+    print(json.dumps(report, ensure_ascii=False))
+    verification = report.get("verification", {})
+    return 0 if all(verification.values()) else 1
+
+
+def command_retention_resume(args) -> int:
+    init_db()
+    ensure_network_schema(get_connection())
+    report = PrivacyRetentionService(get_connection()).resume(args.run_id)
+    print(json.dumps(report, ensure_ascii=False))
+    verification = report.get("verification", {})
+    return 0 if all(verification.values()) else 1
+
+
+def command_retention_report(args) -> int:
+    init_db()
+    ensure_network_schema(get_connection())
+    print(json.dumps(PrivacyRetentionService(get_connection()).report(args.run_id), ensure_ascii=False))
+    return 0
+
+
+def command_retention_abort(args) -> int:
+    init_db()
+    ensure_network_schema(get_connection())
+    print(json.dumps(PrivacyRetentionService(get_connection()).abort_run(args.run_id), ensure_ascii=False))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="network-acceleration", description="5G-A 场景加速运营服务维护入口")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -103,13 +144,29 @@ def main() -> int:
     subparsers.add_parser("check-db", help="检查数据库完整性")
     subparsers.add_parser("smoke", help="执行本地 API 冒烟检查")
     subparsers.add_parser("network-demo", help="执行质差识别与加速演示")
+    preview_parser = subparsers.add_parser("retention-preview", help="预演分级保留与去关联批次")
+    preview_parser.add_argument("--days", type=int, default=180, help="排障保留天数")
+    execute_parser = subparsers.add_parser("retention-execute", help="执行分级保留与去关联批次")
+    execute_parser.add_argument("--days", type=int, default=180, help="排障保留天数")
+    execute_parser.add_argument("--actor", default="retention-job", help="执行人/任务标识")
+    resume_parser = subparsers.add_parser("retention-resume", help="从检查点继续中断的批次")
+    resume_parser.add_argument("run_id", type=int)
+    report_parser = subparsers.add_parser("retention-report", help="查看批次证明报告")
+    report_parser.add_argument("run_id", type=int)
+    abort_parser = subparsers.add_parser("retention-abort", help="将僵留的运行中批次标记为失败")
+    abort_parser.add_argument("run_id", type=int)
     args = parser.parse_args()
     return {
         "init-db": command_init,
         "check-db": command_check,
         "smoke": command_smoke,
         "network-demo": command_network_demo,
-    }[args.command]()
+        "retention-preview": command_retention_preview,
+        "retention-execute": command_retention_execute,
+        "retention-resume": command_retention_resume,
+        "retention-report": command_retention_report,
+        "retention-abort": command_retention_abort,
+    }[args.command](args)
 
 
 if __name__ == "__main__":

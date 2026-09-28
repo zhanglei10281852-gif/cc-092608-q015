@@ -11,6 +11,7 @@
 - 质差事件：将应用目标与实测指标进行确定性比较，记录原因、严重度和处理状态。
 - 动态加速：校验用户权益与生效策略，按区段容量预留上下行资源，支持完成、取消和超时释放。
 - 运营分析：提供场景与应用质差率、容量利用率、会话成效和可恢复事件游标。
+- 分级保留与去关联：按数据类别保留期、法律保全和争议状态计算到期批次，将到期标识替换为不可逆且批次隔离的统计键，支持预演、检查点续跑和证明报告。
 - 身份与审计：提供管理员初始化、用户、角色、会话、权限、操作审计和后台维护能力。
 
 ## 运行环境
@@ -72,6 +73,32 @@ python -m app.cli network-demo
 ```
 
 `smoke` 在进程内检查根路径、健康接口和运营摘要；`network-demo` 会创建高铁场景、应用画像与策略，登记有效权益，写入一条质差样本并启动加速会话。
+
+### 分级保留与去关联
+
+网络体验数据在排障保留期内可关联到脱敏旅客标识；到期后按批次将标识替换为不可逆、批次隔离的统计键（`stat-b<批次号>-<HMAC>`，每批次独立随机密钥，完成后即清除密钥），质差链、容量预留和策略版本关联保持不变。活动中的争议记录（事件处于 `open/accelerating`）与生效中的法律保全标记会暂缓处理。
+
+```bash
+# 预演：列出到期主体、各表扫描/预计更新数量、跳过原因与校验哈希，不写数据
+python -m app.cli retention-preview --days 180
+# 执行：逐主体提交事务并写检查点，中断后可继续
+python -m app.cli retention-execute --days 180 --actor compliance
+python -m app.cli retention-resume 1
+# 证明报告：各表处理数量、跳过原因、投影/聚合校验哈希
+python -m app.cli retention-report 1
+```
+
+接口（需要 `privacy.read` / `privacy.execute` 权限）：
+
+- `POST /api/network/privacy/retention/preview` 预演
+- `POST /api/network/privacy/retention/execute` 执行批次
+- `POST /api/network/privacy/retention/runs/{id}/resume` 从检查点继续
+- `POST /api/network/privacy/retention/runs/{id}/abort` 标记僵留批次为失败
+- `GET  /api/network/privacy/retention/runs/{id}/report` 证明报告
+- `GET  /api/network/privacy/subjects/footprint?subscriber_hash=...` 身份足迹查询（去关联后查不到）
+- `POST/GET /api/network/privacy/legal-holds`、`POST /legal-holds/{id}/release` 法律保全管理
+
+到期判定按数据类别分别计算：样本看 `observed_at`、会话看 `started_at`、权益看 `valid_until`，任一类别未到期则整主体暂缓。报告中的 `projected_checksums`（去除标识列后的行投影）与聚合报表数值执行前后必须一致，否则批次标记失败。重复执行是幂等的：统计键行不会再次改变，摘要哈希保持不变。
 
 ## 目录结构
 

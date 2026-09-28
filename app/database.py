@@ -144,6 +144,8 @@ PERMISSIONS = [
     ("network.read", "查看网络运营数据", "network", "read"),
     ("network.write", "维护网络运营数据", "network", "write"),
     ("policy.publish", "发布加速策略", "policy", "publish"),
+    ("privacy.read", "查看隐私保留与去关联报告", "privacy", "read"),
+    ("privacy.execute", "执行隐私保留与去关联流程", "privacy", "execute"),
 ]
 
 

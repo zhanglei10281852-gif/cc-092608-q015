@@ -199,6 +199,41 @@ CREATE TABLE IF NOT EXISTS operation_events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_operation_events_resource ON operation_events(resource_type,resource_id,id);
+CREATE TABLE IF NOT EXISTS privacy_legal_holds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscriber_hash TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active','released')),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    released_at TEXT,
+    released_by TEXT,
+    release_reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_privacy_holds_state ON privacy_legal_holds(subscriber_hash,state);
+CREATE TABLE IF NOT EXISTS privacy_retention_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    state TEXT NOT NULL DEFAULT 'running' CHECK(state IN ('running','completed','failed')),
+    params_json TEXT NOT NULL,
+    batch_secret TEXT NOT NULL DEFAULT '',
+    baseline_json TEXT NOT NULL DEFAULT '{}',
+    report_json TEXT NOT NULL DEFAULT '{}',
+    failure_message TEXT NOT NULL DEFAULT '',
+    started_by TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS privacy_retention_checkpoints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES privacy_retention_runs(id) ON DELETE CASCADE,
+    subject_digest TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK(decision IN ('deidentified','skipped')),
+    reasons_json TEXT NOT NULL DEFAULT '[]',
+    table_counts_json TEXT NOT NULL DEFAULT '{}',
+    processed_at TEXT NOT NULL,
+    UNIQUE(run_id,subject_digest)
+);
 '''
 
 
